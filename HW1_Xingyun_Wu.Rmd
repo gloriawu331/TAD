@@ -1,0 +1,431 @@
+---
+title: 'Machine Learning: Homework 1'
+author: "Xingyun Wu"
+date: "2018/1/13"
+output:
+  html_document: default
+---
+
+In this assignment, I use Python to download text data, clean data, and build the document-term matrix. Then I use R in the analysis of document similarity.
+
+## Problem 1: Loading the Debate and Parsing the Content
+  This part is done in Python. In my work, there is one step different from the instruction. When I was iterating over the tokenized words, I use two dictionaries to store the unigrams/trigrams of the whole debate, and use another two dictionaries to store unigrams/trigrams of each statement. With this step, I simultaneously get the data ready for iii) and iv). Please see the .py file for detailed process.
+
+## Problem 2: Analyzing Document Similarity
+  This part is done in R. Tables and comments are put at the end of each question.
+  First, initialize and read-in the data as a matrix.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r import_packages, include=TRUE}
+library(NLP)
+library(tm)
+library(tidyverse)
+library(knitr)
+library(KRLS)
+library(kableExtra)
+```
+
+```{r import_format_data, include=TRUE}
+data <- read.csv('matrix.csv')
+data2 <- data[,3:ncol(data)]
+data_mat <- as.matrix(data2)
+```
+
+### 1) Creating Six Square Matrices
+
+#### i) Euclidean Distance between statements
+
+```{r q1_1, include=TRUE}
+# calculate the euclidean distance between the documents
+statement_dist <- dist(data_mat, method = "euclidean")
+statement_dist <- as.matrix(statement_dist)
+```
+
+#### ii) Euclidean distance between statements with tf-idf weights
+
+```{r q1_2_preparation, include=TRUE}
+idf <- log(nrow(data_mat)/(colSums(data_mat)))
+data_tfidf <- data_mat
+
+for(word in names(idf)){
+  data_tfidf[,word] <- data_mat[,word] * idf[word]
+}
+```
+
+```{r q1_2_compute, include=TRUE}
+# calculate the euclidean distance between the documents
+statement_dist_tfidf <- as.matrix(dist(data_tfidf, method = "euclidean"))
+```
+
+#### iii) Cosine similarity between statements
+
+```{r q1_3_function, include=TRUE}
+# Define the function to compute cosine similarity
+cosine<- function(x, y){
+	x.norm<- x/sqrt(x%*%x)
+	y.norm<- y/sqrt(y%*%y)
+	out<- x.norm%*%y.norm
+	return(out)
+	}
+```
+
+```{r q1_3_preparation, include=TRUE}
+statement_cos<- matrix(NA, nrow = nrow(statement_dist), ncol = nrow(statement_dist))
+```
+
+```{r q1_3_compute, include=TRUE, warning=FALSE}
+
+for(z in 1:nrow(statement_dist)){
+	for(y in 1:nrow(statement_dist)){
+		statement_cos[z,y]<- statement_cos[y,z]<- cosine(statement_dist[z,], statement_dist[y,])
+		}
+}
+```
+
+#### iv) Cosine similarity between statements with tf-idf weights
+
+```{r q1_4_praparation, include=TRUE}
+statement_cos_tfidf <- matrix(NA, nrow = nrow(statement_dist), ncol = nrow(statement_dist))
+```
+
+```{r q1_4_compute, include=TRUE, warning=FALSE}
+for(z in 1:nrow(statement_dist_tfidf)){
+	for(y in 1:nrow(statement_dist_tfidf)){
+		statement_cos_tfidf[z,y]<- statement_cos_tfidf[y,z]<- cosine(statement_dist_tfidf[z,], statement_dist_tfidf[y,])
+		}
+}
+```
+
+#### v) Normalization and Gaussian kernel
+
+```{r q1_5_normalization, include=TRUE}
+# normalize the matrix
+data_df <- as.tibble(data_mat)
+data_norm <- as.tibble(matrix(NA, nrow = nrow(data_df), ncol = ncol(data_df)))
+rowSums <- matrix(NA, nrow = nrow(data_df))
+
+for(i in 1:nrow(data_df)){
+  rowSums[[i]] = rowSums(data_df[i,])
+}
+
+for(i in 1:nrow(data_norm)){
+  data_norm[i,] <- data_df[i,]/rowSums[[i]]
+}
+```
+
+```{r q1_5_Gaussian_kernel, include=TRUE}
+statement_norm <- gausskernel(X=as.matrix(na.omit(data_norm)), sigma=1)
+```
+
+#### Normalization and Gaussian kernel with tf-idf weights
+
+```{r q1_6_normalization, include=TRUE}
+# normalize the matrix
+data_df_tfidf <- as.tibble(data_tfidf)
+data_norm_tfidf <- as.tibble(matrix(NA, nrow = nrow(data_df_tfidf), ncol = ncol(data_df_tfidf)))
+rowSums_tfidf <- matrix(NA, nrow = nrow(data_df_tfidf))
+
+for(i in 1:nrow(data_df_tfidf)){
+  rowSums_tfidf[[i]] = rowSums(data_df_tfidf[i,])
+}
+
+for(i in 1:nrow(data_df_tfidf)){
+  data_norm_tfidf[i,] <- data_df_tfidf[i,]/rowSums_tfidf[[i]]
+}
+```
+
+```{r q1_6_Gaussian kernel, include=TRUE}
+statement_norm_tfidf <- gausskernel(X=as.matrix(data_norm_tfidf), sigma=1)
+```
+
+### 2) The Most Similar and Dissimilar Statements
+
+#### i) Euclidean distance among statements
+
+##### a) Without tfidf weighting
+
+```{r q2_dist_original, include=TRUE}
+# Since the original matrix is symmetric, create an upper triangular matrix without diagonal
+statement_dist_upper <- statement_dist
+statement_dist_upper[!upper.tri(statement_dist_upper)] <- NA
+
+# Get the indices of most similar and dissimilar statements
+statement_dist_min <- which(statement_dist_upper == min(statement_dist_upper, na.rm=TRUE), arr.ind = TRUE)
+statement_dist_max <- which(statement_dist_upper == max(statement_dist_upper, na.rm=TRUE), arr.ind = TRUE)
+```
+
+##### b) With tfidf weighting
+
+```{r q2_dist_tfidf, invlude=TRUE}
+# Get the upper trangular matrix
+statement_dist_tfidf_upper <- statement_dist_tfidf
+statement_dist_tfidf_upper[!upper.tri(statement_dist_tfidf_upper)] <- NA
+
+# Get the orders
+statement_dist_tfidf_min <- which(statement_dist_tfidf_upper == min(statement_dist_tfidf_upper, na.rm=TRUE), arr.ind = TRUE)
+statement_dist_tfidf_max <- which(statement_dist_tfidf_upper == max(statement_dist_tfidf_upper, na.rm=TRUE), arr.ind = TRUE)
+```
+
+#### ii) Cosine Similarity among statements
+
+```{r q2_cos_original, include=TRUE}
+# Get the upper trangular matrix
+statement_cos_upper <- statement_cos
+statement_cos_upper[!upper.tri(statement_cos_upper)] <- NA
+
+# Get the orders
+statement_cos_min <- which(statement_cos_upper == min(statement_cos_upper, na.rm=TRUE), arr.ind = TRUE)
+statement_cos_max <- which(statement_cos_upper == max(statement_cos_upper, na.rm=TRUE), arr.ind = TRUE)
+```
+
+```{r q2_cos_tfidf, include=TRUE}
+# Get the upper trangular matrix
+statement_cos_tfidf_upper <- statement_cos_tfidf
+statement_cos_tfidf_upper[!upper.tri(statement_cos_tfidf_upper)] <- NA
+
+# Get the orders
+statement_cos_tfidf_min <- which(statement_cos_tfidf_upper == min(statement_cos_tfidf_upper, na.rm=TRUE), arr.ind = TRUE)
+statement_cos_tfidf_max <- which(statement_cos_tfidf_upper == max(statement_cos_tfidf_upper, na.rm=TRUE), arr.ind = TRUE)
+```
+
+#### iii) With Normalization
+
+```{r q2_norm_original, include=TRUE}
+# Get the upper trangular matrix
+statement_norm_upper <- statement_norm
+statement_norm_upper[!upper.tri(statement_norm_upper)] <- NA
+
+# Get the orders
+statement_norm_min <- which(statement_norm_upper == min(statement_norm_upper, na.rm=TRUE), arr.ind = TRUE)
+statement_norm_max <- which(statement_norm_upper == max(statement_norm_upper, na.rm=TRUE), arr.ind = TRUE)
+```
+
+```{r q2_norm_tfidf_original, include=TRUE}
+# Get the upper trangular matrix
+statement_norm_tfidf_upper <- statement_norm_tfidf
+statement_norm_tfidf_upper[!upper.tri(statement_norm_tfidf_upper)] <- NA
+
+# Get the orders
+statement_norm_tfidf_min <- which(statement_norm_tfidf_upper == min(statement_norm_tfidf_upper, na.rm=TRUE), arr.ind = TRUE)
+statement_norm_tfidf_max <- which(statement_norm_tfidf_upper == max(statement_norm_tfidf_upper, na.rm=TRUE), arr.ind = TRUE)
+```
+
+#### Comparison of the Methods
+##### a) Methods with original data
+  The statement number used in this part follows the number in R, which starts from 1. Since the indexing of Python is different, which starts from 0, the statement numbers in the imported csv file are the following statement numbers minus 1.
+  The Euclidean Distance method shows that Statement 16 is the most similar to Statement 21, Statement 25, and Statement 46. The original content of Statement 16, Statement 21, and Statement 25 are all "all right" said by Lehrer. And Statement 46 is Obama's "sorry". The most dissimilar statements are Statement 32 and Statement 76. The former one is very long, while the latter one is extremely short. This method gives many most similar statements, but only one most dissimilar statements. The most similar ones are similar, but not necessarily teh same. It might be more useful to find the most dissimilar statements.     
+  The Cosine Similarity method shows that the most similar statements are 107, 109, 110. These three statements are exactly the same: 'absolutely'. The most dissimilar statements include Statement 16 and Statement 32, as well as Statement 32 and Statement 39. They are very different in the original texts, in length and wording. This method gives very limited number of most similar statements, and they are very similar (same). But it gives many most dissimilar statements, which might be too many. So this method might be more useful to find the most similar statements.    
+  The Gaussian kernel method shows the most similar statements could be Statement 14 ('Mr.President.') and Statement 39 ('I like it.'). And the most dissimilar statements could be Statement 24 and Statement 27, the former one of which is extremely long while the latter one of which is extremely short. This method seems to be sensitive to the length/function of statement. It could be helpful to find statements with similar/dissimilar functions, but might mot be very helpful to find the exact same/similar/dissimilar statements.    
+  
+##### b) Methods with TFIDF weights
+  With TFIDF weights, the Euclidean Distance method and the Cosine Similarity method give similar results of the most similar statements, for example, 16, 25, and 39. But they seems to disagree with each other for the most dissimilar statements. The Euclidean Distance thinks Statement 2 and Statement 4 are extremely dissimilar, both of which are very long. But the Cosine Similarity thinks the extremely long Statement 4 is most dissimilar to many extremely short statements. So with TFIDF weights, both of the methods are sensitive to length for similarity. But for dissimilarity, the Euclidean Distance might be more sensitive to the contents, while the Cosine Similarity might be more sensitive to the length.    
+  The Gaussian kernel method gives very different results, compared to the above two methods. It seems to focus on some key words, being tolerant to a certain amount of variation. But if the statements are with similar length but very different words, it identify these statements as very dissimilar stateemtns. This method could give reasonable results if we aim to compare the meanings of statements.    
+
+##### c) Brief conclusion
+  The question 'which method appears to perform best' is very difficult to answer. My answer is it depends on our purpose. With the original data, Eudlidean Distance might be the best to find most dissmilar statements, while Cosine Similarity might be the best to find most similar statements. With TFIDF weights, these two methods provides relatively stable/apparent results, while the Gaussian kernel method seems to be the best for interpretation.
+
+#### Printing the Results
+
+  This part shows some original results of this part. Since in some cases there are too many most similar or dissimilar statements, I would only print the first 10 results for them.
+
+```{r compare_results, include=TRUE, echo=FALSE}
+print('Methods without TFIDF Weights:')
+print('  Most Similar Statements:')
+print('    Euclidean Distance:')
+print(statement_dist_min[1:10,])
+print('    Cosine Similarity:')
+print(statement_cos_max)
+print('    Gaussian Kernel:')
+print(statement_norm_max)
+print('  Most Dissimilar Statements:')
+print('    Euclidean Distance:')
+print(statement_dist_max)
+print('    Cosine Similarity:')
+print(statement_cos_min[1:10,])
+print('    Gaussian Kernel:')
+print(statement_norm_min[1:10,])
+print('')
+print('Methods with TFIDF Weights:')
+print('  Most Similar Statements:')
+print('    Euclidean Distance:')
+print(statement_dist_tfidf_min[1:10,])
+print('    Cosine Similarity:')
+print(statement_cos_tfidf_max[1:10,])
+print('    Gaussian Kernel:')
+print(statement_norm_tfidf_max)
+print('  Most Dissimilar Statements:')
+print('    Euclidean Distance:')
+print(statement_dist_tfidf_max)
+print('    Cosine Similarity:')
+print(statement_cos_tfidf_min[1:10,])
+print('    Gaussian Kernel:')
+print(statement_norm_tfidf_min[1:10,])
+```
+
+### 3) The Averaeg Similarity of Statements within and between Candidates
+
+#### i) Within candidates cosine similarities
+
+##### a) Without tfidf weighting
+
+```{r q3_1_original_data, include=TRUE}
+# Combine the statement ID & speaker with the cosine similarity matrix
+statement_cos_upper <- statement_cos
+statement_cos_upper[!upper.tri(statement_cos_upper)] <- NA
+data_with_cos <- cbind(data[1:2], statement_cos_upper)
+
+# Filter by speakers
+cos_LEHRER <- data_with_cos %>%
+  filter(speaker == "LEHRER")
+# Remove columns from other speakers
+col_num_LEHRER <- cos_LEHRER[,1] + 3
+cos_LEHRER <- as.matrix(cos_LEHRER[, col_num_LEHRER])
+
+cos_OBAMA <- data_with_cos %>%
+  filter(speaker == "OBAMA")
+# Remove columns from other speakers
+col_num_OBAMA <- cos_OBAMA[,1] + 3
+cos_OBAMA <- as.matrix(cos_OBAMA[, col_num_OBAMA])
+
+cos_ROMNEY <- data_with_cos %>%
+  filter(speaker == "ROMNEY") 
+# Remove columns from other speakers
+col_num_ROMNEY <- cos_ROMNEY[,1] + 3
+cos_ROMNEY <- as.matrix(cos_ROMNEY[, col_num_ROMNEY])
+```
+
+```{r q3_1_original_result, include=TRUE}
+within_LEHRER <- mean(cos_LEHRER, na.rm=TRUE)
+within_OBAMA <- mean(cos_OBAMA, na.rm=TRUE)
+within_ROMNEY <- mean(cos_ROMNEY, na.rm=TRUE)
+```
+
+##### b) With tfidf weighting
+
+```{r q3_1_tfidf_data, include=TRUE}
+# Combine the statement ID & speaker with the cosine similarity matrix with tfidf weights
+statement_cos_tfidf_upper<- statement_cos_tfidf
+statement_cos_tfidf_upper[!upper.tri(statement_cos_tfidf_upper)] <- NA
+data_with_cos_tfidf <- cbind(data[1:2], statement_cos_tfidf_upper)
+
+# Filter by speakers
+cos_tfidf_LEHRER <- data_with_cos_tfidf %>%
+  filter(speaker == "LEHRER")
+# Remove columns from other speakers
+cos_LEHRER <- as.matrix(cos_tfidf_LEHRER[, col_num_LEHRER])
+
+cos_tfidf_OBAMA <- data_with_cos_tfidf %>%
+  filter(speaker == "OBAMA")
+# Remove columns from other speakers
+cos_tfidf_OBAMA <- as.matrix(cos_tfidf_OBAMA[, col_num_OBAMA])
+
+cos_tfidf_ROMNEY <- data_with_cos_tfidf %>%
+  filter(speaker == "ROMNEY")
+# Remove columns from other speakers
+cos_tfidf_ROMNEY <- as.matrix(cos_tfidf_ROMNEY[, col_num_ROMNEY])
+```
+
+```{r q3_1_tfidf_result, include=TRUE}
+within_LEHRER_tfidf <- mean(cos_LEHRER, na.rm=TRUE)
+within_OBAMA_tfidf <- mean(cos_OBAMA, na.rm=TRUE)
+within_ROMNEY_tfidf <- mean(cos_ROMNEY, na.rm=TRUE)
+```
+
+#### ii) Between candidates cosine similarities
+
+##### a) Without tfidf weighting
+```{r q3_2_original, include=TRUE}
+# Filter by speakers
+cos_not_LEHRER <- data_with_cos %>%
+  filter(speaker != "LEHRER")
+# Remove columns from other speakers
+col_num_not_LEHRER <- cos_not_LEHRER[,1] + 3
+cos_not_LEHRER <- as.matrix(cos_not_LEHRER[, col_num_not_LEHRER])
+
+cos_not_OBAMA <- data_with_cos %>%
+  filter(speaker != "OBAMA")
+# Remove columns from other speakers
+col_num_not_OBAMA <- cos_not_OBAMA[,1] + 3
+cos_not_OBAMA <- as.matrix(cos_not_OBAMA[, col_num_not_OBAMA])
+
+cos_not_ROMNEY <- data_with_cos %>%
+  filter(speaker != "ROMNEY") 
+# Remove columns from other speakers
+col_num_not_ROMNEY <- cos_not_ROMNEY[,1] + 3
+cos_not_ROMNEY <- as.matrix(cos_not_ROMNEY[, col_num_not_ROMNEY])
+```
+
+```{r q3_2_original_result, include=TRUE}
+OBAMA_ROMNEY <- mean(cos_not_LEHRER, na.rm=TRUE)
+LEHRER_ROMNEY <- mean(cos_not_OBAMA, na.rm=TRUE)
+LEHRER_OBAMA <- mean(cos_not_ROMNEY, na.rm=TRUE)
+ALL <- mean(statement_cos_upper, na.rm=TRUE)
+```
+
+##### b) With tfidf weighting
+
+```{r q3_2_tfidf, include=TRUE}
+# Filter by speakers
+cos_not_LEHRER_tfidf <- data_with_cos_tfidf %>%
+  filter(speaker != "LEHRER")
+# Remove columns from other speakers
+col_num_not_LEHRER_tfidf <- cos_not_LEHRER_tfidf[,1] + 3
+cos_not_LEHRER_tfidf <- as.matrix(cos_not_LEHRER_tfidf[, col_num_not_LEHRER_tfidf])
+
+cos_not_OBAMA_tfidf <- data_with_cos_tfidf %>%
+  filter(speaker != "OBAMA")
+# Remove columns from other speakers
+col_num_not_OBAMA_tfidf <- cos_not_OBAMA_tfidf[,1] + 3
+cos_not_OBAMA_tfidf <- as.matrix(cos_not_OBAMA_tfidf[, col_num_not_OBAMA_tfidf])
+
+cos_not_ROMNEY_tfidf <- data_with_cos_tfidf %>%
+  filter(speaker != "ROMNEY") 
+# Remove columns from other speakers
+col_num_not_ROMNEY_tfidf <- cos_not_ROMNEY_tfidf[,1] + 3
+cos_not_ROMNEY_tfidf <- as.matrix(cos_not_ROMNEY_tfidf[, col_num_not_ROMNEY_tfidf])
+```
+
+```{r q3_2_tfidf_result, include=TRUE}
+OBAMA_ROMNEY_tfidf <- mean(cos_not_LEHRER_tfidf, na.rm=TRUE)
+LEHRER_ROMNEY_tfidf <- mean(cos_not_OBAMA_tfidf, na.rm=TRUE)
+LEHRER_OBAMA_tfidf <- mean(cos_not_ROMNEY_tfidf, na.rm=TRUE)
+ALL_tfidf <- mean(statement_cos_tfidf_upper, na.rm=TRUE)
+```
+
+##### Put the results into table
+
+```{r get_table, include=TRUE, echo=FALSE}
+result_mat <- matrix(NA, nrow = 7, ncol = 3)
+result_mat[1, 1] <- 'Lehrer'
+result_mat[1, 2] <- round(within_LEHRER, digit=6)
+result_mat[1, 3] <- round(within_LEHRER_tfidf, digit=6)
+result_mat[2, 1] <- 'Obama'
+result_mat[2, 2] <- round(within_OBAMA, digit=6)
+result_mat[2, 3] <- round(within_OBAMA_tfidf, digit=6)
+result_mat[3, 1] <- 'Romney'
+result_mat[3, 2] <- round(within_ROMNEY, digit=6)
+result_mat[3, 3] <- round(within_ROMNEY_tfidf, digit=6)
+result_mat[4, 1] <- 'Obama and Romney'
+result_mat[4, 2] <- round(OBAMA_ROMNEY, digit=6)
+result_mat[4, 3] <- round(OBAMA_ROMNEY_tfidf, digit=6)
+result_mat[5, 1] <- 'Lehrer and Romney'
+result_mat[5, 2] <- round(LEHRER_ROMNEY, digit=6)
+result_mat[5, 3] <- round(LEHRER_ROMNEY_tfidf, digit=6)
+result_mat[6, 1] <- 'Lehrer and Obama'
+result_mat[6, 2] <- round(LEHRER_OBAMA, digit=6)
+result_mat[6, 3] <- round(LEHRER_OBAMA_tfidf, digit=6)
+result_mat[7, 1] <- 'All'
+result_mat[7, 2] <- round(ALL, digit=6)
+result_mat[7, 3] <- round(ALL_tfidf, digit=6)
+
+result_col <- c('Speaker', 'Cosine Similarity', 'Cosine Similarity with TFIDF Weights')
+kable(result_mat, format='html', col.names=result_col, align='c', caption='Average Similarity of Statements between Candidates') %>%
+  kable_styling(bootstrap_options='basic', full_width=TRUE, position='center')
+```
+  Patterns in my results are very complicated. Generally, within candidate similarity should be greater than between candidates similarity. However, my results show that this is not necessarily true. The average similarity of statements of Obama is less than average similarity of every other categories. And the average similarity of statements of Romney is less than other similarities, except for the average similarity of statements of Obama. But the similarity between Lehrer and Romney, and the similarity between Lehrer and Obama, are high.     
+  Here is one possible explanation for the surprising results. In my document-term matrix, Lehrer has 77 statements, Obama has 43 statements, and Romney has 56 statements. As I checked the original text, statements of Lehrer are short, while statements of the other two are long. Lehrer said limited things in this debate, and many of them were used to get Obama or Romney talk, which is why his statements are similar to each other. Both Obama and Romney had long statements, and those statements might have referred to many issues, so they have relatively lower similarity within their own statements.     
+  For the between candidates similarity, the cosine similarity with TFIDF weights is generally larger than the cosine similarity with original data. But the within candidates similarities does not follow the same pattern. For both Obama and Romney, they are almost the same. For Lehrer, the cosine similarity with TFIDF weights is slightly less than the cosine similarity of original data. 
+  
